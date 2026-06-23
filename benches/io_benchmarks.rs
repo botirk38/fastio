@@ -909,15 +909,18 @@ fn bench_read_at_batch(c: &mut Criterion) {
         // --- fastio::uring single reads for comparison ---
         #[cfg(all(target_os = "linux", feature = "io-uring"))]
         if uring_available() {
-            group.bench_function(BenchmarkId::new("fastio_uring_sequential", batch_size), |b| {
-                let file = fastio::uring::File::open(&path).unwrap();
-                b.iter(|| {
-                    for &(offset, len) in &regions {
-                        let bytes = file.read_at(offset, len).unwrap();
-                        black_box(bytes.len());
-                    }
-                });
-            });
+            group.bench_function(
+                BenchmarkId::new("fastio_uring_sequential", batch_size),
+                |b| {
+                    let file = fastio::uring::File::open(&path).unwrap();
+                    b.iter(|| {
+                        for &(offset, len) in &regions {
+                            let bytes = file.read_at(offset, len).unwrap();
+                            black_box(bytes.len());
+                        }
+                    });
+                },
+            );
         }
 
         group.finish();

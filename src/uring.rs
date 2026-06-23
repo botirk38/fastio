@@ -225,14 +225,10 @@ impl<A: Allocator> File<A> {
                     let file_offset = offset.checked_add(so_far as u64).ok_or_else(|| {
                         Error::new(ErrorKind::InvalidInput, "read offset overflow")
                     })?;
-                    let entry = opcode::Read::new(
-                        types::Fd(self.inner.as_raw_fd()),
-                        ptr,
-                        io_len,
-                    )
-                    .offset(file_offset)
-                    .build()
-                    .user_data(idx as u64);
+                    let entry = opcode::Read::new(types::Fd(self.inner.as_raw_fd()), ptr, io_len)
+                        .offset(file_offset)
+                        .build()
+                        .user_data(idx as u64);
                     {
                         let mut sq = ring.submission();
                         if unsafe { sq.push(&entry) }.is_err() {
