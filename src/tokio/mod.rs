@@ -1,14 +1,13 @@
 //! Tokio async file I/O.
 //!
-//! This module wraps `std::fs::File` behind an `Arc` and runs all operations
-//! via `tokio::task::spawn_blocking`, keeping the Tokio runtime threads free.
+//! This module wraps `std::fs::File` and runs all operations via
+//! `tokio::task::spawn_blocking`, keeping the Tokio runtime threads free.
 
 use std::fs::{Metadata, Permissions};
 use std::io;
 #[cfg(windows)]
 use std::io::Seek;
 use std::path::Path;
-use std::sync::Arc;
 
 use crate::{Allocator, DefaultAllocator, IoResult, OwnedBytes, WriteSlices};
 
@@ -18,12 +17,11 @@ compile_error!("fastio tokio supports Linux, macOS, and Windows only");
 /// A Tokio-backed file handle.
 ///
 /// All I/O is dispatched to the blocking thread pool via
-/// [`tokio::task::spawn_blocking`]. The underlying `std::fs::File` is shared
-/// through an `Arc`, so cloning is cheap and positioned I/O on Unix is
-/// lock-free (pread/pwrite do not move the file cursor).
+/// [`tokio::task::spawn_blocking`]. Each blocking call receives its own
+/// OS-level file handle via `try_clone` (a cheap kernel `dup`).
 #[derive(Debug)]
 pub struct File<A = DefaultAllocator> {
-    inner: Arc<std::fs::File>,
+    inner: std::fs::File,
     allocator: A,
 }
 
@@ -64,39 +62,26 @@ impl<A> File<A> {
     pub fn as_std(&self) -> &std::fs::File {
         &self.inner
     }
+
+    /// Consumes this handle, returning the underlying `std::fs::File`.
+    pub fn into_std(self) -> std::fs::File {
+        self.inner
+    }
 }
 
 impl<A: Allocator> File<A> {
-    /// Returns a file handle safe for concurrent positioned I/O.
-    ///
-    /// On Unix, shares the cached handle (pread/pwrite are position-independent).
-    /// On Windows, clones to avoid seek races.
-    fn positioned_handle(&self) -> io::Result<Arc<std::fs::File>> {
-        #[cfg(unix)]
-        {
-            Ok(Arc::clone(&self.inner))
-        }
-        #[cfg(windows)]
-        {
-            Ok(Arc::new(self.inner.try_clone()?))
-        }
-    }
-
-    /// Creates a new `File` instance sharing the same underlying handle.
+    /// Creates a new `File` instance sharing the same underlying OS handle.
     pub async fn try_clone(&self) -> io::Result<Self> {
-        let file = Arc::clone(&self.inner);
-        let cloned = ::tokio::task::spawn_blocking(move || file.try_clone())
-            .await
-            .map_err(io::Error::other)??;
+        let dup = self.inner.try_clone()?;
         Ok(Self {
-            inner: Arc::new(cloned),
+            inner: dup,
             allocator: self.allocator.clone(),
         })
     }
 
     /// Queries metadata about the underlying file.
     pub async fn metadata(&self) -> io::Result<Metadata> {
-        let file = Arc::clone(&self.inner);
+        let file = self.inner.try_clone()?;
         ::tokio::task::spawn_blocking(move || file.metadata())
             .await
             .map_err(io::Error::other)?
@@ -104,7 +89,7 @@ impl<A: Allocator> File<A> {
 
     /// Truncates or extends the underlying file.
     pub async fn set_len(&self, size: u64) -> io::Result<()> {
-        let file = Arc::clone(&self.inner);
+        let file = self.inner.try_clone()?;
         ::tokio::task::spawn_blocking(move || file.set_len(size))
             .await
             .map_err(io::Error::other)?
@@ -112,7 +97,7 @@ impl<A: Allocator> File<A> {
 
     /// Attempts to sync all OS-internal file content and metadata to disk.
     pub async fn sync_all(&self) -> io::Result<()> {
-        let file = Arc::clone(&self.inner);
+        let file = self.inner.try_clone()?;
         ::tokio::task::spawn_blocking(move || file.sync_all())
             .await
             .map_err(io::Error::other)?
@@ -120,7 +105,7 @@ impl<A: Allocator> File<A> {
 
     /// Attempts to sync file content to disk.
     pub async fn sync_data(&self) -> io::Result<()> {
-        let file = Arc::clone(&self.inner);
+        let file = self.inner.try_clone()?;
         ::tokio::task::spawn_blocking(move || file.sync_data())
             .await
             .map_err(io::Error::other)?
@@ -128,7 +113,7 @@ impl<A: Allocator> File<A> {
 
     /// Changes permissions on the underlying file.
     pub async fn set_permissions(&self, perm: Permissions) -> io::Result<()> {
-        let file = Arc::clone(&self.inner);
+        let file = self.inner.try_clone()?;
         ::tokio::task::spawn_blocking(move || file.set_permissions(perm))
             .await
             .map_err(io::Error::other)?
@@ -136,7 +121,7 @@ impl<A: Allocator> File<A> {
 
     /// Reads the whole file into memory from offset 0.
     pub async fn read_all(&self) -> io::Result<OwnedBytes> {
-        let file = self.positioned_handle()?;
+        let file = self.inner.try_clone()?;
         let allocator = self.allocator.clone();
         ::tokio::task::spawn_blocking(move || {
             let len = usize::try_from(file.metadata()?.len())
@@ -163,7 +148,7 @@ impl<A: Allocator> File<A> {
         if len == 0 {
             return Ok(OwnedBytes::Vec(Vec::new()));
         }
-        let file = self.positioned_handle()?;
+        let file = self.inner.try_clone()?;
         let allocator = self.allocator.clone();
         ::tokio::task::spawn_blocking(move || {
             let mut bytes = allocator.allocate(len);
@@ -185,7 +170,7 @@ impl<A: Allocator> File<A> {
         if buf.is_empty() {
             return Ok(());
         }
-        let file = self.positioned_handle()?;
+        let file = self.inner.try_clone()?;
         let len = buf.len();
         let bytes = ::tokio::task::spawn_blocking(move || {
             let mut bytes = vec![0u8; len];
@@ -203,7 +188,7 @@ impl<A: Allocator> File<A> {
         if buf.is_empty() {
             return Ok(());
         }
-        let file = self.positioned_handle()?;
+        let file = self.inner.try_clone()?;
         let bytes = buf.to_vec();
         ::tokio::task::spawn_blocking(move || Self::write_at_positioned(&file, offset, &bytes))
             .await
@@ -212,7 +197,7 @@ impl<A: Allocator> File<A> {
 
     /// Writes non-overlapping slices at their offsets.
     pub async fn write_slices_at(&self, writes: WriteSlices<'_, '_>) -> io::Result<()> {
-        let file = self.positioned_handle()?;
+        let file = self.inner.try_clone()?;
         let writes = writes
             .as_slice()
             .iter()
@@ -406,10 +391,7 @@ impl<A: Allocator> OpenOptions<A> {
         let inner = ::tokio::task::spawn_blocking(move || opts.open(path))
             .await
             .map_err(io::Error::other)??;
-        Ok(File {
-            inner: Arc::new(inner),
-            allocator,
-        })
+        Ok(File { inner, allocator })
     }
 }
 
