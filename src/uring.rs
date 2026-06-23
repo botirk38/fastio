@@ -175,7 +175,8 @@ impl<A: Allocator> File<A> {
             .collect();
 
         let depth = self.ring_depth;
-        with_ring(depth, |ring: &mut IoUring| {
+        let fd = self.inner.as_raw_fd();
+        self.with_ring(|ring| {
             let n = regions.len();
             let mut done = vec![0usize; n];
             let mut state = vec![SubmissionState::Idle; n];
@@ -210,7 +211,7 @@ impl<A: Allocator> File<A> {
                     let file_offset = offset.checked_add(so_far as u64).ok_or_else(|| {
                         Error::new(ErrorKind::InvalidInput, "read offset overflow")
                     })?;
-                    let entry = opcode::Read::new(types::Fd(self.inner.as_raw_fd()), ptr, io_len)
+                    let entry = opcode::Read::new(types::Fd(fd), ptr, io_len)
                         .offset(file_offset)
                         .build()
                         .user_data(idx as u64);
