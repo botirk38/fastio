@@ -95,39 +95,49 @@ impl<A: Allocator> File<A> {
     }
 
     pub fn read_exact_at(&self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
+        let mut handle = &self.inner;
+        let original_position = handle.stream_position()?;
         let mut read = 0usize;
+        let mut result = Ok(());
         while read < buf.len() {
             let read_offset = offset.checked_add(read as u64).ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidInput, "read offset overflow")
             })?;
             let n = self.inner.seek_read(&mut buf[read..], read_offset)?;
             if n == 0 {
-                return Err(io::Error::new(
+                result = Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
                     "seek_read returned zero bytes before buffer was filled",
                 ));
+                break;
             }
             read += n;
         }
-        Ok(())
+        let restore = handle.seek(SeekFrom::Start(original_position));
+        result.and(restore.map(|_| ()))
     }
 
     pub fn write_all_at(&self, offset: u64, buf: &[u8]) -> io::Result<()> {
+        let mut handle = &self.inner;
+        let original_position = handle.stream_position()?;
         let mut written = 0usize;
+        let mut result = Ok(());
         while written < buf.len() {
             let write_offset = offset.checked_add(written as u64).ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidInput, "write offset overflow")
             })?;
             let n = self.inner.seek_write(&buf[written..], write_offset)?;
             if n == 0 {
-                return Err(io::Error::new(
+                result = Err(io::Error::new(
                     io::ErrorKind::WriteZero,
                     "seek_write returned zero bytes",
                 ));
+                break;
             }
             written += n;
         }
-        Ok(())
+        let restore = handle.seek(SeekFrom::Start(original_position));
+        result.and(restore.map(|_| ()))
     }
 
     pub fn write_slices_at(&self, writes: WriteSlices<'_, '_>) -> io::Result<()> {

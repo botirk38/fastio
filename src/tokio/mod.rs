@@ -5,6 +5,8 @@
 
 use std::fs::{Metadata, Permissions};
 use std::io;
+#[cfg(windows)]
+use std::io::Seek;
 use std::path::Path;
 
 use crate::{Allocator, DefaultAllocator, IoResult, OwnedBytes, WriteSlices};
@@ -312,21 +314,26 @@ fn read_at_positioned(file: &std::fs::File, offset: u64, buf: &mut [u8]) -> IoRe
 #[cfg(windows)]
 fn read_at_positioned(file: &std::fs::File, offset: u64, buf: &mut [u8]) -> IoResult<()> {
     use std::os::windows::fs::FileExt;
+    let mut handle = file;
+    let original_position = handle.stream_position()?;
     let mut read = 0;
+    let mut result = Ok(());
     while read < buf.len() {
         let read_offset = offset
             .checked_add(read as u64)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "read offset overflow"))?;
         let n = file.seek_read(&mut buf[read..], read_offset)?;
         if n == 0 {
-            return Err(std::io::Error::new(
+            result = Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
                 "unexpected EOF during positioned read",
             ));
+            break;
         }
         read += n;
     }
-    Ok(())
+    let restore = handle.seek(std::io::SeekFrom::Start(original_position));
+    result.and(restore.map(|_| ()))
 }
 
 /// Positioned write that doesn't require a seek (uses OS-level pwrite).
@@ -339,21 +346,26 @@ fn write_at_positioned(file: &std::fs::File, offset: u64, data: &[u8]) -> IoResu
 #[cfg(windows)]
 fn write_at_positioned(file: &std::fs::File, offset: u64, data: &[u8]) -> IoResult<()> {
     use std::os::windows::fs::FileExt;
+    let mut handle = file;
+    let original_position = handle.stream_position()?;
     let mut written = 0;
+    let mut result = Ok(());
     while written < data.len() {
         let write_offset = offset
             .checked_add(written as u64)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "write offset overflow"))?;
         let n = file.seek_write(&data[written..], write_offset)?;
         if n == 0 {
-            return Err(io::Error::new(
+            result = Err(io::Error::new(
                 io::ErrorKind::WriteZero,
                 "seek_write returned zero bytes",
             ));
+            break;
         }
         written += n;
     }
-    Ok(())
+    let restore = handle.seek(std::io::SeekFrom::Start(original_position));
+    result.and(restore.map(|_| ()))
 }
 
 #[cfg(test)]
