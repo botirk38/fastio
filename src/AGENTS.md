@@ -8,6 +8,8 @@ Guidelines for agents editing `src`.
 - Keep backend modules focused on file I/O only.
 - Preserve explicit backend choice; do not add a root default file API.
 - Do not add backend-level free functions; operations belong on concrete backend file types.
+- Treat internal functions and types like API surface. They should be composable, clean, general, and purposeful, not premature wrappers around one or two call sites.
+- Prefer inlining simple logic. Add an internal helper only when it encodes a real invariant, isolates platform/unsafe complexity, or represents a meaningful reusable operation.
 - Do not add format-specific behavior or policy decisions here.
 
 ## Feature Gates

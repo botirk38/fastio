@@ -8,6 +8,7 @@ Guidelines for agents editing the `tokio` backend.
 - Keep parallel positioned writes implemented with scoped threads inside `tokio::task::block_in_place` unless there is a measured reason to change it.
 - Keep async public methods on `tokio::File` and `tokio::OpenOptions`; use blocking sections only around APIs that must use positioned synchronous writes.
 - Do not reintroduce an `AsyncIo` trait or backend service object.
+- Internal helpers must be as clean and purposeful as public methods. Do not hide simple positioned reads/writes behind helper wrappers unless the helper isolates real platform-specific behavior or repeated complexity.
 
 ## Validation
 

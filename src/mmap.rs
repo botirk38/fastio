@@ -140,17 +140,12 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn write_tmp(dir: &TempDir, name: &str, data: &[u8]) -> std::path::PathBuf {
-        let path = dir.path().join(name);
-        std::fs::write(&path, data).unwrap();
-        path
-    }
-
     #[test]
     fn map_file_roundtrip() {
         let dir = TempDir::new().unwrap();
         let data: Vec<u8> = (0u8..=255).cycle().take(4096).collect();
-        let path = write_tmp(&dir, "file.bin", &data);
+        let path = dir.path().join("file.bin");
+        std::fs::write(&path, &data).unwrap();
 
         let region = File::open(&path).unwrap().map().unwrap();
         assert_eq!(region.as_slice(), &data[..]);
@@ -161,7 +156,8 @@ mod tests {
     #[test]
     fn map_file_empty_returns_error() {
         let dir = TempDir::new().unwrap();
-        let path = write_tmp(&dir, "empty.bin", b"");
+        let path = dir.path().join("empty.bin");
+        std::fs::write(&path, b"").unwrap();
 
         let err = File::open(&path).unwrap().map().unwrap_err();
         assert!(
@@ -176,7 +172,8 @@ mod tests {
     fn map_range_returns_correct_slice() {
         let dir = TempDir::new().unwrap();
         let data: Vec<u8> = (0u8..100).collect();
-        let path = write_tmp(&dir, "range.bin", &data);
+        let path = dir.path().join("range.bin");
+        std::fs::write(&path, &data).unwrap();
 
         let region = File::open(&path).unwrap().map_range(10, 20).unwrap();
         assert_eq!(region.as_slice(), &data[10..30]);
@@ -186,7 +183,8 @@ mod tests {
     #[test]
     fn map_range_zero_len_returns_error() {
         let dir = TempDir::new().unwrap();
-        let path = write_tmp(&dir, "z.bin", b"hello");
+        let path = dir.path().join("z.bin");
+        std::fs::write(&path, b"hello").unwrap();
 
         let err = File::open(&path).unwrap().map_range(0, 0).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
@@ -195,7 +193,8 @@ mod tests {
     #[test]
     fn map_range_beyond_file_returns_error() {
         let dir = TempDir::new().unwrap();
-        let path = write_tmp(&dir, "short.bin", b"hi");
+        let path = dir.path().join("short.bin");
+        std::fs::write(&path, b"hi").unwrap();
 
         let err = File::open(&path).unwrap().map_range(0, 1000).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
@@ -205,7 +204,8 @@ mod tests {
     fn map_file_large() {
         let dir = TempDir::new().unwrap();
         let data = vec![0xABu8; 1024 * 1024]; // 1 MiB
-        let path = write_tmp(&dir, "large.bin", &data);
+        let path = dir.path().join("large.bin");
+        std::fs::write(&path, &data).unwrap();
 
         let region = File::open(&path).unwrap().map().unwrap();
         assert_eq!(region.len(), data.len());
@@ -220,7 +220,8 @@ mod tests {
         for (i, b) in data.iter_mut().enumerate() {
             *b = (i % 256) as u8;
         }
-        let path = write_tmp(&dir, "pages.bin", &data);
+        let path = dir.path().join("pages.bin");
+        std::fs::write(&path, &data).unwrap();
 
         // Map 100 bytes starting at the second page boundary (4096)
         let region = File::open(&path).unwrap().map_range(4096, 100).unwrap();
@@ -231,7 +232,8 @@ mod tests {
     #[test]
     fn region_is_cheaply_cloneable() {
         let dir = TempDir::new().unwrap();
-        let path = write_tmp(&dir, "clone.bin", b"hello clone");
+        let path = dir.path().join("clone.bin");
+        std::fs::write(&path, b"hello clone").unwrap();
 
         let r1 = File::open(&path).unwrap().map().unwrap();
         let r2 = r1.clone();

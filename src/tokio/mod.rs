@@ -276,121 +276,129 @@ fn write_at_positioned(file: &std::fs::File, offset: u64, data: &[u8]) -> IoResu
 mod tests {
     use super::*;
     use crate::WriteSlice;
-    use crate::test_utils::run_async;
     use tempfile::TempDir;
 
-    fn write_tmp(dir: &TempDir, name: &str, data: &[u8]) -> std::path::PathBuf {
-        let path = dir.path().join(name);
-        std::fs::write(&path, data).unwrap();
-        path
-    }
-
-    fn read_all(path: &std::path::Path) -> crate::OwnedBytes {
-        let file = run_async(File::open(path)).unwrap();
-        run_async(file.read_all()).unwrap()
-    }
-
-    #[test]
-    fn read_roundtrip() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn read_roundtrip() {
         let dir = TempDir::new().unwrap();
         let data: Vec<u8> = (0u8..=255).cycle().take(4096).collect();
-        let path = write_tmp(&dir, "file.bin", &data);
-        let result = read_all(&path);
+        let path = dir.path().join("file.bin");
+        std::fs::write(&path, &data).unwrap();
+        let file = File::open(&path).await.unwrap();
+        let result = file.read_all().await.unwrap();
         assert_eq!(result.as_ref(), &data[..]);
     }
 
-    #[test]
-    fn read_empty() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn read_empty() {
         let dir = TempDir::new().unwrap();
-        let path = write_tmp(&dir, "empty.bin", b"");
-        let result = read_all(&path);
+        let path = dir.path().join("empty.bin");
+        std::fs::write(&path, b"").unwrap();
+        let file = File::open(&path).await.unwrap();
+        let result = file.read_all().await.unwrap();
         assert!(result.is_empty());
     }
 
-    #[test]
-    fn file_read_at_returns_correct_slice() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn file_read_at_returns_correct_slice() {
         let dir = TempDir::new().unwrap();
-        let path = write_tmp(&dir, "data.bin", b"hello world");
-        let file = run_async(File::open(&path)).unwrap();
-        let result = run_async(file.read_at(6, 5)).unwrap();
+        let path = dir.path().join("data.bin");
+        std::fs::write(&path, b"hello world").unwrap();
+        let file = File::open(&path).await.unwrap();
+        let result = file.read_at(6, 5).await.unwrap();
         assert_eq!(result.as_ref(), b"world");
     }
 
-    #[test]
-    fn file_read_at_zero_len() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn file_read_at_zero_len() {
         let dir = TempDir::new().unwrap();
-        let path = write_tmp(&dir, "data.bin", b"hello");
-        let file = run_async(File::open(&path)).unwrap();
-        let result = run_async(file.read_at(0, 0)).unwrap();
+        let path = dir.path().join("data.bin");
+        std::fs::write(&path, b"hello").unwrap();
+        let file = File::open(&path).await.unwrap();
+        let result = file.read_at(0, 0).await.unwrap();
         assert!(result.is_empty());
     }
 
-    #[test]
-    fn write_roundtrip() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn write_roundtrip() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("out.bin");
-        let file = run_async(File::create(&path)).unwrap();
-        run_async(file.write_all_at(0, b"test data")).unwrap();
-        let result = read_all(&path);
+        let file = File::create(&path).await.unwrap();
+        file.write_all_at(0, b"test data").await.unwrap();
+        let file = File::open(&path).await.unwrap();
+        let result = file.read_all().await.unwrap();
         assert_eq!(result.as_ref(), b"test data");
     }
 
-    #[test]
-    fn write_truncates_existing() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn write_truncates_existing() {
         let dir = TempDir::new().unwrap();
-        let path = write_tmp(&dir, "existing.bin", b"old data here");
-        let file = run_async(File::create(&path)).unwrap();
-        run_async(file.write_all_at(0, b"new")).unwrap();
-        let result = read_all(&path);
+        let path = dir.path().join("existing.bin");
+        std::fs::write(&path, b"old data here").unwrap();
+        let file = File::create(&path).await.unwrap();
+        file.write_all_at(0, b"new").await.unwrap();
+        let file = File::open(&path).await.unwrap();
+        let result = file.read_all().await.unwrap();
         assert_eq!(result.as_ref(), b"new");
     }
 
-    #[test]
-    fn write_at_preserves_surrounding_bytes() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn write_at_preserves_surrounding_bytes() {
         let dir = TempDir::new().unwrap();
-        let path = write_tmp(&dir, "data.bin", b"hello world");
-        let file = run_async(OpenOptions::new().write(true).open(&path)).unwrap();
-        run_async(file.write_all_at(6, b"rust!")).unwrap();
-        let result = read_all(&path);
+        let path = dir.path().join("data.bin");
+        std::fs::write(&path, b"hello world").unwrap();
+        let file = OpenOptions::new().write(true).open(&path).await.unwrap();
+        file.write_all_at(6, b"rust!").await.unwrap();
+        let file = File::open(&path).await.unwrap();
+        let result = file.read_all().await.unwrap();
         assert_eq!(result.as_ref(), b"hello rust!");
     }
 
-    #[test]
-    fn write_slices_batches_into_existing_file() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn write_slices_batches_into_existing_file() {
         let dir = TempDir::new().unwrap();
-        let path = write_tmp(&dir, "data.bin", b"----------");
+        let path = dir.path().join("data.bin");
+        std::fs::write(&path, b"----------").unwrap();
         let slices = vec![WriteSlice::new(0, b"AB"), WriteSlice::new(8, b"CD")];
-        let file = run_async(OpenOptions::new().write(true).open(&path)).unwrap();
-        run_async(file.write_slices_at(crate::WriteSlices::new(&slices).unwrap())).unwrap();
-        let result = read_all(&path);
+        let file = OpenOptions::new().write(true).open(&path).await.unwrap();
+        file.write_slices_at(crate::WriteSlices::new(&slices).unwrap())
+            .await
+            .unwrap();
+        let file = File::open(&path).await.unwrap();
+        let result = file.read_all().await.unwrap();
         assert_eq!(result.as_ref(), b"AB------CD");
     }
 
-    #[test]
-    fn write_slices_empty_batch_is_noop() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn write_slices_empty_batch_is_noop() {
         let dir = TempDir::new().unwrap();
-        let path = write_tmp(&dir, "data.bin", b"unchanged");
-        let file = run_async(OpenOptions::new().write(true).open(&path)).unwrap();
-        run_async(file.write_slices_at(crate::WriteSlices::new(&[]).unwrap())).unwrap();
-        let result = read_all(&path);
+        let path = dir.path().join("data.bin");
+        std::fs::write(&path, b"unchanged").unwrap();
+        let file = OpenOptions::new().write(true).open(&path).await.unwrap();
+        file.write_slices_at(crate::WriteSlices::new(&[]).unwrap())
+            .await
+            .unwrap();
+        let file = File::open(&path).await.unwrap();
+        let result = file.read_all().await.unwrap();
         assert_eq!(result.as_ref(), b"unchanged");
     }
 
-    #[test]
-    fn set_len_creates_exact_length() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn set_len_creates_exact_length() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("positioned.bin");
-        let file = run_async(File::create(&path)).unwrap();
-        run_async(file.set_len(16)).unwrap();
-        let result = read_all(&path);
+        let file = File::create(&path).await.unwrap();
+        file.set_len(16).await.unwrap();
+        let file = File::open(&path).await.unwrap();
+        let result = file.read_all().await.unwrap();
         assert_eq!(result.as_ref().len(), 16);
     }
 
-    #[test]
-    fn create_creates_file() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn create_creates_file() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("new.bin");
-        run_async(File::create(&path)).unwrap();
+        File::create(&path).await.unwrap();
         assert!(path.exists());
     }
 }

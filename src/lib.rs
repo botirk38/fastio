@@ -45,15 +45,3 @@ pub use buffer::MmapRegion;
 pub use buffer::PoolConfig;
 pub use buffer::{BufferAllocator, OwnedBytes};
 pub use write::{WriteSlice, WriteSlices};
-
-#[cfg(all(test, feature = "tokio"))]
-pub(crate) mod test_utils {
-    pub fn run_async<F>(future: F) -> F::Output
-    where
-        F: std::future::Future,
-    {
-        tokio::runtime::Runtime::new()
-            .expect("tokio runtime creation failed")
-            .block_on(future)
-    }
-}
