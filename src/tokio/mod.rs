@@ -1,7 +1,7 @@
 //! Tokio async file I/O.
 //!
-//! This module mirrors `tokio::fs` where behavior matches, while adding async
-//! positioned I/O methods for large-file workloads.
+//! This module wraps `std::fs::File` behind an `Arc` and runs all operations
+//! via `tokio::task::spawn_blocking`, keeping the Tokio runtime threads free.
 
 use std::fs::{Metadata, Permissions};
 use std::io;
@@ -16,10 +16,14 @@ use crate::{Allocator, DefaultAllocator, IoResult, OwnedBytes, WriteSlices};
 compile_error!("fastio tokio supports Linux, macOS, and Windows only");
 
 /// A Tokio-backed file handle.
+///
+/// All I/O is dispatched to the blocking thread pool via
+/// [`tokio::task::spawn_blocking`]. The underlying `std::fs::File` is shared
+/// through an `Arc`, so cloning is cheap and positioned I/O on Unix is
+/// lock-free (pread/pwrite do not move the file cursor).
 #[derive(Debug)]
 pub struct File<A = DefaultAllocator> {
-    inner: ::tokio::fs::File,
-    std_file: Arc<std::fs::File>,
+    inner: Arc<std::fs::File>,
     allocator: A,
 }
 
@@ -55,6 +59,13 @@ impl File<DefaultAllocator> {
     }
 }
 
+impl<A> File<A> {
+    /// Returns a reference to the underlying `std::fs::File`.
+    pub fn as_std(&self) -> &std::fs::File {
+        &self.inner
+    }
+}
+
 impl<A: Allocator> File<A> {
     /// Returns a file handle safe for concurrent positioned I/O.
     ///
@@ -63,48 +74,64 @@ impl<A: Allocator> File<A> {
     fn positioned_handle(&self) -> io::Result<Arc<std::fs::File>> {
         #[cfg(unix)]
         {
-            Ok(self.std_file.clone())
+            Ok(Arc::clone(&self.inner))
         }
         #[cfg(windows)]
         {
-            Ok(Arc::new(self.std_file.as_ref().try_clone()?))
+            Ok(Arc::new(self.inner.try_clone()?))
         }
     }
 
     /// Creates a new `File` instance sharing the same underlying handle.
     pub async fn try_clone(&self) -> io::Result<Self> {
-        let inner = self.inner.try_clone().await?;
-        let std_file = Arc::new(inner.try_clone().await?.into_std().await);
+        let file = Arc::clone(&self.inner);
+        let cloned = ::tokio::task::spawn_blocking(move || file.try_clone())
+            .await
+            .map_err(io::Error::other)??;
         Ok(Self {
-            inner,
-            std_file,
+            inner: Arc::new(cloned),
             allocator: self.allocator.clone(),
         })
     }
 
     /// Queries metadata about the underlying file.
     pub async fn metadata(&self) -> io::Result<Metadata> {
-        self.inner.metadata().await
+        let file = Arc::clone(&self.inner);
+        ::tokio::task::spawn_blocking(move || file.metadata())
+            .await
+            .map_err(io::Error::other)?
     }
 
     /// Truncates or extends the underlying file.
     pub async fn set_len(&self, size: u64) -> io::Result<()> {
-        self.inner.set_len(size).await
+        let file = Arc::clone(&self.inner);
+        ::tokio::task::spawn_blocking(move || file.set_len(size))
+            .await
+            .map_err(io::Error::other)?
     }
 
     /// Attempts to sync all OS-internal file content and metadata to disk.
     pub async fn sync_all(&self) -> io::Result<()> {
-        self.inner.sync_all().await
+        let file = Arc::clone(&self.inner);
+        ::tokio::task::spawn_blocking(move || file.sync_all())
+            .await
+            .map_err(io::Error::other)?
     }
 
     /// Attempts to sync file content to disk.
     pub async fn sync_data(&self) -> io::Result<()> {
-        self.inner.sync_data().await
+        let file = Arc::clone(&self.inner);
+        ::tokio::task::spawn_blocking(move || file.sync_data())
+            .await
+            .map_err(io::Error::other)?
     }
 
     /// Changes permissions on the underlying file.
     pub async fn set_permissions(&self, perm: Permissions) -> io::Result<()> {
-        self.inner.set_permissions(perm).await
+        let file = Arc::clone(&self.inner);
+        ::tokio::task::spawn_blocking(move || file.set_permissions(perm))
+            .await
+            .map_err(io::Error::other)?
     }
 
     /// Reads the whole file into memory from offset 0.
@@ -287,12 +314,6 @@ impl<A: Allocator> File<A> {
     }
 }
 
-impl<A> AsRef<::tokio::fs::File> for File<A> {
-    fn as_ref(&self) -> &::tokio::fs::File {
-        &self.inner
-    }
-}
-
 /// Options and flags for opening a Tokio-backed file.
 #[derive(Debug, Clone)]
 pub struct OpenOptions<A = DefaultAllocator> {
@@ -373,20 +394,20 @@ impl<A: Allocator> OpenOptions<A> {
 
     /// Opens a file with the configured options.
     pub async fn open<P: AsRef<Path>>(&self, path: P) -> io::Result<File<A>> {
-        let mut options = ::tokio::fs::OpenOptions::new();
-        options
-            .read(self.read)
+        let mut opts = std::fs::OpenOptions::new();
+        opts.read(self.read)
             .write(self.write)
             .append(self.append)
             .truncate(self.truncate)
             .create(self.create)
             .create_new(self.create_new);
         let allocator = self.allocator.clone();
-        let inner = options.open(path).await?;
-        let std_file = Arc::new(inner.try_clone().await?.into_std().await);
+        let path = path.as_ref().to_owned();
+        let inner = ::tokio::task::spawn_blocking(move || opts.open(path))
+            .await
+            .map_err(io::Error::other)??;
         Ok(File {
-            inner,
-            std_file,
+            inner: Arc::new(inner),
             allocator,
         })
     }
