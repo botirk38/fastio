@@ -37,3 +37,8 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "fs", "macros", "i
 name = "io_benchmarks"
 harness = false
 required-features = ["sync", "mmap", "pool", "tokio", "io-uring"]
+
+[[bench]]
+name = "profile_targets"
+harness = false
+required-features = ["sync", "mmap", "pool", "tokio", "io-uring"]
