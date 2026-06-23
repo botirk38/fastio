@@ -190,7 +190,7 @@ impl<A: Allocator> File<A> {
             .collect();
 
         let depth = self.ring_depth;
-        with_ring(depth, |ring| {
+        with_ring(depth, |ring: &mut IoUring| {
             let n = regions.len();
             let mut done = vec![0usize; n];
             let mut state = vec![SubmissionState::Idle; n];

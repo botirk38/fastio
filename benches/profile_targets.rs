@@ -115,14 +115,18 @@ fn profile_allocator_system() {
 }
 
 fn main() {
-    let target = std::env::args().nth(1).unwrap_or_else(|| {
-        eprintln!(
-            "Usage: profile_targets <target>\n\
-             Targets: read_at_pool, read_at_system, read_at_std, async_read_fastio,\n\
-             async_read_raw, uring_read_at, uring_read_all, allocator_pool, allocator_system"
-        );
-        std::process::exit(1);
-    });
+    let target = match std::env::args().nth(1) {
+        Some(t) => t,
+        None => {
+            // No argument: exit gracefully so `cargo test --bench` succeeds.
+            eprintln!(
+                "Usage: profile_targets <target>\n\
+                 Targets: read_at_pool, read_at_system, read_at_std, async_read_fastio,\n\
+                 async_read_raw, uring_read_at, uring_read_all, allocator_pool, allocator_system"
+            );
+            return;
+        }
+    };
 
     let dir = tempfile::TempDir::new().unwrap();
     let path = create_test_file(dir.path(), "test.bin", FILE_SIZE);
