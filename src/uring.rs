@@ -41,6 +41,22 @@ pub struct File<A = DefaultAllocator> {
     allocator: A,
 }
 
+impl<A> File<A> {
+    /// Returns a reference to the underlying `std::fs::File`.
+    #[inline]
+    #[must_use]
+    pub const fn as_std(&self) -> &std::fs::File {
+        &self.inner
+    }
+
+    /// Consumes this handle, returning the underlying `std::fs::File`.
+    #[inline]
+    #[must_use]
+    pub fn into_std(self) -> std::fs::File {
+        self.inner
+    }
+}
+
 impl File<DefaultAllocator> {
     /// Opens a file in read-only mode.
     pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Self> {
@@ -81,26 +97,31 @@ impl<A: Allocator> File<A> {
     }
 
     /// Queries metadata about the underlying file.
+    #[inline]
     pub fn metadata(&self) -> io::Result<Metadata> {
         self.inner.metadata()
     }
 
     /// Truncates or extends the underlying file.
+    #[inline]
     pub fn set_len(&self, size: u64) -> io::Result<()> {
         self.inner.set_len(size)
     }
 
     /// Attempts to sync all OS-internal file content and metadata to disk.
+    #[inline]
     pub fn sync_all(&self) -> io::Result<()> {
         self.inner.sync_all()
     }
 
     /// Attempts to sync file content to disk.
+    #[inline]
     pub fn sync_data(&self) -> io::Result<()> {
         self.inner.sync_data()
     }
 
     /// Changes permissions on the underlying file.
+    #[inline]
     pub fn set_permissions(&self, perm: Permissions) -> io::Result<()> {
         self.inner.set_permissions(perm)
     }
@@ -140,11 +161,13 @@ impl<A: Allocator> File<A> {
     }
 
     /// Reads exactly enough bytes to fill `buf` at `offset`.
+    #[inline]
     pub fn read_exact_at(&self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
         self.submit_read_exact_at(&self.inner, offset, buf)
     }
 
     /// Writes all bytes from `buf` at `offset`.
+    #[inline]
     pub fn write_all_at(&self, offset: u64, buf: &[u8]) -> io::Result<()> {
         self.submit_write_exact_at(&self.inner, offset, buf)
     }
@@ -706,6 +729,7 @@ impl<A> Seek for File<A> {
 }
 
 impl<A> AsRef<std::fs::File> for File<A> {
+    #[inline]
     fn as_ref(&self) -> &std::fs::File {
         &self.inner
     }
@@ -737,18 +761,21 @@ impl OpenOptions<DefaultAllocator> {
 
 impl<A: Allocator> OpenOptions<A> {
     /// Sets read access.
+    #[inline]
     pub fn read(&mut self, read: bool) -> &mut Self {
         self.inner.read(read);
         self
     }
 
     /// Sets write access.
+    #[inline]
     pub fn write(&mut self, write: bool) -> &mut Self {
         self.inner.write(write);
         self
     }
 
     /// Sets append mode.
+    #[inline]
     pub fn append(&mut self, append: bool) -> &mut Self {
         self.inner.append(append);
         self.append = append;
@@ -756,30 +783,35 @@ impl<A: Allocator> OpenOptions<A> {
     }
 
     /// Sets truncate-on-open behavior.
+    #[inline]
     pub fn truncate(&mut self, truncate: bool) -> &mut Self {
         self.inner.truncate(truncate);
         self
     }
 
     /// Sets create-if-missing behavior.
+    #[inline]
     pub fn create(&mut self, create: bool) -> &mut Self {
         self.inner.create(create);
         self
     }
 
     /// Sets create-new behavior.
+    #[inline]
     pub fn create_new(&mut self, create_new: bool) -> &mut Self {
         self.inner.create_new(create_new);
         self
     }
 
     /// Sets the ring depth used by this file.
+    #[inline]
     pub fn ring_depth(&mut self, ring_depth: u32) -> &mut Self {
         self.ring_depth = ring_depth;
         self
     }
 
     /// Sets the maximum chunk size submitted to the ring.
+    #[inline]
     pub fn chunk_size(&mut self, chunk_size: usize) -> &mut Self {
         self.chunk_size = chunk_size;
         self

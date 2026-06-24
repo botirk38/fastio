@@ -59,11 +59,15 @@ impl File<DefaultAllocator> {
 
 impl<A> File<A> {
     /// Returns a reference to the underlying `std::fs::File`.
-    pub fn as_std(&self) -> &std::fs::File {
+    #[inline]
+    #[must_use]
+    pub const fn as_std(&self) -> &std::fs::File {
         &self.inner
     }
 
     /// Consumes this handle, returning the underlying `std::fs::File`.
+    #[inline]
+    #[must_use]
     pub fn into_std(self) -> std::fs::File {
         self.inner
     }
@@ -198,35 +202,14 @@ impl<A: Allocator> File<A> {
     /// Writes non-overlapping slices at their offsets.
     pub async fn write_slices_at(&self, writes: WriteSlices<'_, '_>) -> io::Result<()> {
         let file = self.inner.try_clone()?;
-        let writes = writes
+        let owned: Vec<(u64, Vec<u8>)> = writes
             .as_slice()
             .iter()
             .map(|w| (w.offset, w.data.to_vec()))
-            .collect::<Vec<_>>();
+            .collect();
         ::tokio::task::spawn_blocking(move || {
-            if writes.is_empty() {
-                return Ok(());
-            }
-            let workers = std::thread::available_parallelism()
-                .map(usize::from)
-                .unwrap_or(1)
-                .min(writes.len())
-                .max(1);
-            for batch in writes.chunks(workers) {
-                std::thread::scope(|scope| {
-                    let handles = batch
-                        .iter()
-                        .map(|(offset, data)| {
-                            scope.spawn(|| Self::write_at_positioned(&file, *offset, data))
-                        })
-                        .collect::<Vec<_>>();
-                    for handle in handles {
-                        handle
-                            .join()
-                            .map_err(|_| io::Error::other("positioned write worker panicked"))??;
-                    }
-                    Ok::<_, io::Error>(())
-                })?;
+            for (offset, data) in &owned {
+                Self::write_at_positioned(&file, *offset, data)?;
             }
             Ok(())
         })
@@ -234,8 +217,8 @@ impl<A: Allocator> File<A> {
         .map_err(io::Error::other)?
     }
 
-    /// Positioned read that doesn't require a seek.
     #[cfg(unix)]
+    #[inline]
     fn read_at_positioned(file: &std::fs::File, offset: u64, buf: &mut [u8]) -> IoResult<()> {
         use std::os::unix::fs::FileExt;
         file.read_exact_at(buf, offset)
@@ -266,8 +249,8 @@ impl<A: Allocator> File<A> {
         result.and(restore.map(|_| ()))
     }
 
-    /// Positioned write that doesn't require a seek.
     #[cfg(unix)]
+    #[inline]
     fn write_at_positioned(file: &std::fs::File, offset: u64, data: &[u8]) -> IoResult<()> {
         use std::os::unix::fs::FileExt;
         file.write_all_at(data, offset)
@@ -329,37 +312,43 @@ impl OpenOptions<DefaultAllocator> {
 
 impl<A: Allocator> OpenOptions<A> {
     /// Sets read access.
-    pub fn read(&mut self, read: bool) -> &mut Self {
+    #[inline]
+    pub const fn read(&mut self, read: bool) -> &mut Self {
         self.read = read;
         self
     }
 
     /// Sets write access.
-    pub fn write(&mut self, write: bool) -> &mut Self {
+    #[inline]
+    pub const fn write(&mut self, write: bool) -> &mut Self {
         self.write = write;
         self
     }
 
     /// Sets append mode.
-    pub fn append(&mut self, append: bool) -> &mut Self {
+    #[inline]
+    pub const fn append(&mut self, append: bool) -> &mut Self {
         self.append = append;
         self
     }
 
     /// Sets truncate-on-open behavior.
-    pub fn truncate(&mut self, truncate: bool) -> &mut Self {
+    #[inline]
+    pub const fn truncate(&mut self, truncate: bool) -> &mut Self {
         self.truncate = truncate;
         self
     }
 
     /// Sets create-if-missing behavior.
-    pub fn create(&mut self, create: bool) -> &mut Self {
+    #[inline]
+    pub const fn create(&mut self, create: bool) -> &mut Self {
         self.create = create;
         self
     }
 
     /// Sets create-new behavior.
-    pub fn create_new(&mut self, create_new: bool) -> &mut Self {
+    #[inline]
+    pub const fn create_new(&mut self, create_new: bool) -> &mut Self {
         self.create_new = create_new;
         self
     }

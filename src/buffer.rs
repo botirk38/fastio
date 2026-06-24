@@ -172,14 +172,14 @@ impl OwnedBytes {
     #[cfg(feature = "pool")]
     #[inline]
     #[must_use]
-    pub fn from_pooled(buf: PooledBuffer) -> Self {
+    pub const fn from_pooled(buf: PooledBuffer) -> Self {
         Self::Pooled(buf)
     }
 
     /// Wrap a plain `Vec<u8>`.
     #[inline]
     #[must_use]
-    pub fn from_vec(v: Vec<u8>) -> Self {
+    pub const fn from_vec(v: Vec<u8>) -> Self {
         Self::Vec(v)
     }
 
