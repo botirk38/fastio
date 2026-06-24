@@ -1,0 +1,178 @@
+{
+  "read_all": [
+    {
+      "size": "4KiB",
+      "std_ns": 6423.5,
+      "fastio_ns": 2229.7,
+      "mmap_ns": 5393.6,
+      "speedup": 2.8808808359869045
+    },
+    {
+      "size": "64KiB",
+      "std_ns": 9726.2,
+      "fastio_ns": 5670.3,
+      "mmap_ns": 5229.9,
+      "speedup": 1.7152884327107913
+    },
+    {
+      "size": "1MiB",
+      "std_ns": 72601.0,
+      "fastio_ns": 66781.0,
+      "mmap_ns": 5144.4,
+      "speedup": 1.0871505368293377
+    },
+    {
+      "size": "16MiB",
+      "std_ns": 1661700.0,
+      "fastio_ns": 1701400.0,
+      "mmap_ns": 5732.1,
+      "speedup": 0.9766662748324909
+    },
+    {
+      "size": "64MiB",
+      "std_ns": 55335000.0,
+      "fastio_ns": 25332000.0,
+      "mmap_ns": 6393.3,
+      "speedup": 2.1843912837517765
+    }
+  ],
+  "write_all_at": [
+    {
+      "size": "64KiB",
+      "std_ns": 3720.8,
+      "fastio_ns": 3738.1000000000004
+    },
+    {
+      "size": "1MiB",
+      "std_ns": 3759.5,
+      "fastio_ns": 3840.3999999999996
+    },
+    {
+      "size": "16MiB",
+      "std_ns": 3741.2000000000003,
+      "fastio_ns": 4100.900000000001
+    },
+    {
+      "size": "64MiB",
+      "std_ns": 3816.0,
+      "fastio_ns": 3758.2
+    }
+  ],
+  "allocator": [
+    {
+      "size": "4KiB",
+      "sys_ns": 108.87,
+      "pool_ns": 17.235,
+      "speedup": 6.316797214969539
+    },
+    {
+      "size": "64KiB",
+      "sys_ns": 777.68,
+      "pool_ns": 30.326,
+      "speedup": 25.644001846600275
+    },
+    {
+      "size": "1MiB",
+      "sys_ns": 16202.000000000002,
+      "pool_ns": 30.757,
+      "speedup": 526.7743928211464
+    },
+    {
+      "size": "16MiB",
+      "sys_ns": 268250.0,
+      "pool_ns": 30.14,
+      "speedup": 8900.132714001327
+    }
+  ],
+  "uring_batch": [
+    {
+      "n": "4",
+      "seq_ns": 3484.5,
+      "batch_ns": 3406.4,
+      "speedup": 1.0229274307186473
+    },
+    {
+      "n": "16",
+      "seq_ns": 13828.0,
+      "batch_ns": 16905.0,
+      "speedup": 0.8179828453120379
+    },
+    {
+      "n": "64",
+      "seq_ns": 73519.0,
+      "batch_ns": 47752.0,
+      "speedup": 1.53960043558385
+    },
+    {
+      "n": "256",
+      "seq_ns": 323890.0,
+      "batch_ns": 243190.0,
+      "speedup": 1.3318393026029032
+    }
+  ],
+  "async_read": [
+    {
+      "size": "4KiB",
+      "raw_ns": 35409.0,
+      "fastio_ns": 74828.0
+    },
+    {
+      "size": "64KiB",
+      "raw_ns": 38812.0,
+      "fastio_ns": 83427.0
+    },
+    {
+      "size": "1MiB",
+      "raw_ns": 125220.0,
+      "fastio_ns": 200310.0
+    },
+    {
+      "size": "16MiB",
+      "raw_ns": 1461500.0,
+      "fastio_ns": 2218500.0
+    },
+    {
+      "size": "64MiB",
+      "raw_ns": 53601000.0,
+      "fastio_ns": 48710000.0
+    }
+  ],
+  "cursor": [
+    {
+      "size": "1MiB",
+      "std_ns": 81022.0,
+      "fastio_ns": 81306.0,
+      "op": "Read"
+    },
+    {
+      "size": "16MiB",
+      "std_ns": 1171400.0,
+      "fastio_ns": 1156400.0,
+      "op": "Read"
+    },
+    {
+      "size": "64MiB",
+      "std_ns": 5994000.0,
+      "fastio_ns": 6141200.0,
+      "op": "Read"
+    },
+    {
+      "size": "1MiB",
+      "std_ns": 122790.0,
+      "fastio_ns": 124630.0,
+      "op": "Write"
+    },
+    {
+      "size": "16MiB",
+      "std_ns": 1908700.0,
+      "fastio_ns": 1943200.0,
+      "op": "Write"
+    },
+    {
+      "size": "64MiB",
+      "std_ns": 9068300.0,
+      "fastio_ns": 9385700.0,
+      "op": "Write"
+    }
+  ]
+}
