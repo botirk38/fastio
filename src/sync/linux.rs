@@ -3,16 +3,15 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::FileExt;
 use std::path::Path;
 
-use crate::{Allocator, DefaultAllocator, OwnedBytes, WriteSlices};
+use crate::{Bytes, WriteSlices};
 
 /// A synchronous Linux file handle.
 #[derive(Debug)]
-pub struct File<A = DefaultAllocator> {
+pub struct File {
     inner: std::fs::File,
-    allocator: A,
 }
 
-impl File<DefaultAllocator> {
+impl File {
     pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         OpenOptions::new().read(true).open(path)
     }
@@ -33,13 +32,10 @@ impl File<DefaultAllocator> {
     pub fn options() -> OpenOptions {
         OpenOptions::new()
     }
-}
 
-impl<A: Allocator> File<A> {
     pub fn try_clone(&self) -> io::Result<Self> {
         Ok(Self {
             inner: self.inner.try_clone()?,
-            allocator: self.allocator.clone(),
         })
     }
 
@@ -63,13 +59,13 @@ impl<A: Allocator> File<A> {
         self.inner.set_permissions(perm)
     }
 
-    pub fn read_all(&self) -> io::Result<OwnedBytes> {
+    pub fn read_all(&self) -> io::Result<Bytes> {
         let len = usize::try_from(self.inner.metadata()?.len())
             .map_err(|_| io::Error::other("file too large"))?;
         if len == 0 {
-            return Ok(OwnedBytes::Vec(Vec::new()));
+            return Ok(Bytes::Vec(Vec::new()));
         }
-        let mut bytes = self.allocator.allocate(len);
+        let mut bytes = Bytes::allocate(len);
         let buf = bytes
             .as_mut_slice()
             .ok_or_else(|| io::Error::other("allocator returned immutable buffer"))?;
@@ -80,11 +76,11 @@ impl<A: Allocator> File<A> {
         Ok(bytes)
     }
 
-    pub fn read_at(&self, offset: u64, len: usize) -> io::Result<OwnedBytes> {
+    pub fn read_at(&self, offset: u64, len: usize) -> io::Result<Bytes> {
         if len == 0 {
-            return Ok(OwnedBytes::Vec(Vec::new()));
+            return Ok(Bytes::Vec(Vec::new()));
         }
-        let mut bytes = self.allocator.allocate(len);
+        let mut bytes = Bytes::allocate(len);
         let buf = bytes
             .as_mut_slice()
             .ok_or_else(|| io::Error::other("allocator returned immutable buffer"))?;
@@ -111,13 +107,13 @@ impl<A: Allocator> File<A> {
     }
 }
 
-impl<A> Read for File<A> {
+impl Read for File {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.inner.read(buf)
     }
 }
 
-impl<A> Write for File<A> {
+impl Write for File {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.inner.write(buf)
     }
@@ -127,35 +123,31 @@ impl<A> Write for File<A> {
     }
 }
 
-impl<A> Seek for File<A> {
+impl Seek for File {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         self.inner.seek(pos)
     }
 }
 
-impl<A> AsRef<std::fs::File> for File<A> {
+impl AsRef<std::fs::File> for File {
     fn as_ref(&self) -> &std::fs::File {
         &self.inner
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct OpenOptions<A = DefaultAllocator> {
+pub struct OpenOptions {
     inner: std::fs::OpenOptions,
-    allocator: A,
 }
 
-impl OpenOptions<DefaultAllocator> {
+impl OpenOptions {
     #[must_use]
     pub fn new() -> Self {
         Self {
             inner: std::fs::OpenOptions::new(),
-            allocator: DefaultAllocator::default(),
         }
     }
-}
 
-impl<A: Allocator> OpenOptions<A> {
     pub fn read(&mut self, read: bool) -> &mut Self {
         self.inner.read(read);
         self
@@ -186,22 +178,14 @@ impl<A: Allocator> OpenOptions<A> {
         self
     }
 
-    pub fn allocator<B: Allocator>(&self, allocator: B) -> OpenOptions<B> {
-        OpenOptions {
-            inner: self.inner.clone(),
-            allocator,
-        }
-    }
-
-    pub fn open<P: AsRef<Path>>(&self, path: P) -> io::Result<File<A>> {
+    pub fn open<P: AsRef<Path>>(&self, path: P) -> io::Result<File> {
         Ok(File {
             inner: self.inner.open(path)?,
-            allocator: self.allocator.clone(),
         })
     }
 }
 
-impl Default for OpenOptions<DefaultAllocator> {
+impl Default for OpenOptions {
     fn default() -> Self {
         Self::new()
     }

@@ -10,10 +10,9 @@ keywords = ["io", "storage", "performance", "mmap", "async"]
 categories = ["filesystem", "asynchronous", "concurrency"]
 
 [features]
-default = ["sync", "mmap", "pool", "tokio", "io-uring"]
+default = ["sync", "mmap", "tokio", "io-uring"]
 sync = []
 mmap = ["dep:memmap2", "dep:region"]
-pool = ["dep:zeropool"]
 tokio = ["dep:tokio"]
 io-uring = ["dep:io-uring", "dep:libc"]
 
@@ -21,7 +20,7 @@ io-uring = ["dep:io-uring", "dep:libc"]
 memmap2 = { version = "0.9", optional = true }
 region = { version = "3.0.2", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "fs", "macros", "io-util"] }
-zeropool = { version = "0.3.1", default-features = false, optional = true }
+zeropool = { version = "0.3.1", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = { version = "0.7", optional = true }

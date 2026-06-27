@@ -16,7 +16,7 @@ Guidelines for agents editing `src`.
 
 - `tokio` code requires `feature = "tokio"`.
 - `mmap::File`, `MmapRegion`, and `OwnedBytes::Mmap` require `feature = "mmap"`.
-- Pool-backed buffers require `feature = "pool"`.
+
 - `io_uring` is Linux-only and requires `feature = "io-uring"`.
 
 ## Allocation

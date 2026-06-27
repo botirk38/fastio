@@ -1,22 +1,17 @@
 //! Owned byte buffer types for storage I/O.
 //!
-//! [`OwnedBytes`] is a zero-copy owned byte container that can be backed by
-//! pooled, memory-mapped, or plain `Vec` storage. All variants
-//! implement `AsRef<[u8]>` and `Deref<Target = [u8]>` for uniform read access.
+//! [`Bytes`] is a zero-copy owned byte container that can be backed by a pooled,
+//! memory-mapped, or plain `Vec` storage. All variants provide uniform read
+//! access via `AsRef<[u8]>` and `Deref<Target = [u8]>`.
 //!
-//! # Buffer allocation
-//!
-//! Read-capable backends allocate through [`Allocator`]. With the `pool` feature
-//! enabled, [`DefaultAllocator`] is [`Pool`] and reads return
-//! [`OwnedBytes::Pooled`]. Without `pool`, the default is [`System`] and reads
-//! return [`OwnedBytes::Vec`].
+//! Read-capable backends allocate through the internal crate-only `Bytes::allocate`
+//! path, which reuses buffers from a process-wide pool.
+//! Zero-length reads return an empty `Bytes::Vec` without touching the pool.
 
 use std::sync::Arc;
 
-#[cfg(feature = "pool")]
+#[cfg(any(feature = "sync", feature = "tokio", feature = "io-uring"))]
 use zeropool::BufferPool;
-#[cfg(feature = "pool")]
-pub use zeropool::PooledBuffer;
 
 // ============================================================================
 // MmapRegion — Arc-backed memory-mapped file region
@@ -85,95 +80,35 @@ impl std::ops::Deref for MmapRegion {
 }
 
 // ============================================================================
-// Allocators
-// ============================================================================
-
-/// Allocates mutable buffers for read-capable backends.
-///
-/// Implementors must return an [`OwnedBytes`] variant with a mutable slice of
-/// exactly `len` bytes.
-pub trait Allocator: Clone + Send + Sync + std::fmt::Debug + 'static {
-    /// Allocate a zeroed buffer of `len` bytes.
-    fn allocate(&self, len: usize) -> OwnedBytes;
-}
-
-/// Allocates plain heap buffers with `Vec<u8>`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct System;
-
-impl Allocator for System {
-    #[inline]
-    fn allocate(&self, len: usize) -> OwnedBytes {
-        OwnedBytes::Vec(vec![0u8; len])
-    }
-}
-
-/// Allocates buffers from the process-wide pool.
-#[cfg(feature = "pool")]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Pool;
-
-#[cfg(feature = "pool")]
-impl Allocator for Pool {
-    #[inline]
-    fn allocate(&self, len: usize) -> OwnedBytes {
-        use std::sync::OnceLock;
-        static POOL: OnceLock<BufferPool> = OnceLock::new();
-        let pool = POOL.get_or_init(|| {
-            BufferPool::builder()
-                .num_shards(8)
-                .tls_cache_size(4)
-                .max_buffers_per_shard(32)
-                .min_buffer_size(1024 * 1024)
-                .build()
-        });
-        OwnedBytes::Pooled(pool.get(len))
-    }
-}
-
-#[cfg(feature = "pool")]
-impl Pool {
-    /// Creates a pool-backed allocator.
-    #[must_use]
-    pub const fn new() -> Self {
-        Self
-    }
-}
-
-/// Default read allocator for this build.
-#[cfg(feature = "pool")]
-pub type DefaultAllocator = Pool;
-
-/// Default read allocator for this build.
-#[cfg(not(feature = "pool"))]
-pub type DefaultAllocator = System;
-
-// ============================================================================
-// OwnedBytes
+// Bytes
 // ============================================================================
 
 /// Owned byte buffer backed by one of several storage strategies.
 ///
 /// All variants provide uniform read access via `AsRef<[u8]>` / `Deref`.
 /// Only the `Pooled` and `Vec` variants support mutable access.
-pub enum OwnedBytes {
-    /// A buffer returned from the global [`BufferPool`].
-    #[cfg(feature = "pool")]
-    Pooled(PooledBuffer),
+pub enum Bytes {
+    /// A buffer returned from the internal process-wide pool.
+    Pooled(zeropool::PooledBuffer),
     /// A memory-mapped file region (zero-copy, read-only).
     #[cfg(feature = "mmap")]
-    Mmap(MmapRegion),
+    Mmap(crate::mmap::MmapRegion),
     /// A plain heap-allocated buffer.
     Vec(Vec<u8>),
 }
 
-impl OwnedBytes {
-    /// Wrap a pooled buffer.
-    #[cfg(feature = "pool")]
+impl Bytes {
+    /// Allocate a buffer for a read of `len` bytes.
+    ///
+    /// The returned buffer is not initialized; the caller must fill it through
+    /// `as_mut_slice` before exposing it to consumers.
+    #[cfg(any(feature = "sync", feature = "tokio", feature = "io-uring"))]
     #[inline]
-    #[must_use]
-    pub fn from_pooled(buf: PooledBuffer) -> Self {
-        Self::Pooled(buf)
+    pub(crate) fn allocate(len: usize) -> Self {
+        if len == 0 {
+            return Self::Vec(Vec::new());
+        }
+        Self::Pooled(global_pool().get(len))
     }
 
     /// Wrap a plain `Vec<u8>`.
@@ -188,7 +123,6 @@ impl OwnedBytes {
     #[must_use]
     pub fn len(&self) -> usize {
         match self {
-            #[cfg(feature = "pool")]
             Self::Pooled(b) => b.len(),
             #[cfg(feature = "mmap")]
             Self::Mmap(b) => b.len(),
@@ -205,12 +139,11 @@ impl OwnedBytes {
 
     /// Returns a mutable byte slice for the variants that own their memory.
     ///
-    /// Returns `None` for [`OwnedBytes::Mmap`], which is immutable.
+    /// Returns `None` for [`Bytes::Mmap`], which is immutable.
     #[inline]
     #[must_use]
     pub fn as_mut_slice(&mut self) -> Option<&mut [u8]> {
         match self {
-            #[cfg(feature = "pool")]
             Self::Pooled(b) => Some(b.as_mut_slice()),
             #[cfg(feature = "mmap")]
             Self::Mmap(_) => None,
@@ -224,7 +157,6 @@ impl OwnedBytes {
     #[must_use]
     pub fn into_vec(self) -> Vec<u8> {
         match self {
-            #[cfg(feature = "pool")]
             Self::Pooled(b) => b.into_inner(),
             #[cfg(feature = "mmap")]
             Self::Mmap(b) => b.as_slice().to_vec(),
@@ -238,7 +170,6 @@ impl OwnedBytes {
     #[must_use]
     pub fn into_shared(self) -> Arc<[u8]> {
         match self {
-            #[cfg(feature = "pool")]
             Self::Pooled(b) => b.into_inner().into(),
             #[cfg(feature = "mmap")]
             Self::Mmap(b) => Arc::from(b.as_slice()),
@@ -247,11 +178,10 @@ impl OwnedBytes {
     }
 }
 
-impl AsRef<[u8]> for OwnedBytes {
+impl AsRef<[u8]> for Bytes {
     #[inline]
     fn as_ref(&self) -> &[u8] {
         match self {
-            #[cfg(feature = "pool")]
             Self::Pooled(b) => b.as_ref(),
             #[cfg(feature = "mmap")]
             Self::Mmap(b) => b.as_slice(),
@@ -260,7 +190,7 @@ impl AsRef<[u8]> for OwnedBytes {
     }
 }
 
-impl std::ops::Deref for OwnedBytes {
+impl std::ops::Deref for Bytes {
     type Target = [u8];
 
     #[inline]
@@ -269,35 +199,33 @@ impl std::ops::Deref for OwnedBytes {
     }
 }
 
-impl std::fmt::Debug for OwnedBytes {
+impl std::fmt::Debug for Bytes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OwnedBytes")
+        f.debug_struct("Bytes")
             .field("len", &self.len())
             .finish_non_exhaustive()
     }
 }
 
-impl From<Vec<u8>> for OwnedBytes {
+impl From<Vec<u8>> for Bytes {
     #[inline]
     fn from(v: Vec<u8>) -> Self {
         Self::Vec(v)
     }
 }
 
-#[cfg(feature = "pool")]
-impl From<PooledBuffer> for OwnedBytes {
-    #[inline]
-    fn from(buf: PooledBuffer) -> Self {
-        Self::Pooled(buf)
-    }
-}
-
-#[cfg(feature = "mmap")]
-impl From<MmapRegion> for OwnedBytes {
-    #[inline]
-    fn from(region: MmapRegion) -> Self {
-        Self::Mmap(region)
-    }
+#[cfg(any(feature = "sync", feature = "tokio", feature = "io-uring"))]
+fn global_pool() -> &'static BufferPool {
+    use std::sync::OnceLock;
+    static POOL: OnceLock<BufferPool> = OnceLock::new();
+    POOL.get_or_init(|| {
+        BufferPool::builder()
+            .num_shards(8)
+            .tls_cache_size(4)
+            .max_buffers_per_shard(32)
+            .min_buffer_size(1024 * 1024)
+            .build()
+    })
 }
 
 // ============================================================================
@@ -309,7 +237,7 @@ mod tests {
     use super::*;
 
     #[cfg(feature = "mmap")]
-    fn make_mmap_region() -> MmapRegion {
+    fn make_mmap_region() -> crate::mmap::MmapRegion {
         use std::io::Write;
         let mut tmp = tempfile::NamedTempFile::new().unwrap();
         tmp.write_all(b"hello_mmap").unwrap();
@@ -318,20 +246,20 @@ mod tests {
         // SAFETY: the temp file remains alive for the duration of the mapping
         // setup, and memmap2 owns the resulting mapping independently.
         let mmap = unsafe { memmap2::MmapOptions::new().map(&file).unwrap() };
-        MmapRegion::new(Arc::new(mmap), 0, 10)
+        crate::mmap::MmapRegion::new(Arc::new(mmap), 0, 10)
     }
 
     #[test]
     fn from_vec_roundtrips() {
         let data = vec![1u8, 2, 3];
-        let ob = OwnedBytes::from_vec(data.clone());
+        let ob = Bytes::from_vec(data.clone());
         assert_eq!(ob.as_ref(), &data[..]);
     }
 
-    #[cfg(feature = "pool")]
+    #[cfg(any(feature = "sync", feature = "tokio", feature = "io-uring"))]
     #[test]
-    fn from_pooled_roundtrips() {
-        let mut ob = Pool::new().allocate(8);
+    fn allocate_pooled_roundtrips() {
+        let mut ob = Bytes::allocate(8);
         let buf = ob.as_mut_slice().unwrap();
         buf[..4].copy_from_slice(&[10, 20, 30, 40]);
         assert_eq!(&ob.as_ref()[..4], &[10, 20, 30, 40]);
@@ -340,29 +268,29 @@ mod tests {
     #[test]
     fn vec_variant() {
         let data = vec![5u8, 6, 7];
-        let ob = OwnedBytes::Vec(data.clone());
+        let ob = Bytes::from_vec(data.clone());
         assert_eq!(ob.as_ref(), &data[..]);
     }
 
     #[cfg(feature = "mmap")]
     #[test]
     fn mmap_variant_accessible() {
-        let ob = OwnedBytes::Mmap(make_mmap_region());
+        let ob = Bytes::Mmap(make_mmap_region());
         assert_eq!(ob.as_ref(), b"hello_mmap");
     }
 
     #[test]
     fn len_and_is_empty_vec() {
-        let ob = OwnedBytes::from_vec(vec![1, 2]);
+        let ob = Bytes::from_vec(vec![1, 2]);
         assert_eq!(ob.len(), 2);
         assert!(!ob.is_empty());
-        let empty = OwnedBytes::from_vec(vec![]);
+        let empty = Bytes::from_vec(vec![]);
         assert!(empty.is_empty());
     }
 
     #[test]
     fn zero_length_vec_has_mutable_empty_slice() {
-        let mut ob = OwnedBytes::from_vec(Vec::new());
+        let mut ob = Bytes::from_vec(Vec::new());
 
         let slice = ob.as_mut_slice().unwrap();
 
@@ -372,35 +300,35 @@ mod tests {
 
     #[test]
     fn deref_matches_as_ref() {
-        let ob = OwnedBytes::from_vec(vec![42u8; 8]);
+        let ob = Bytes::from_vec(vec![42u8; 8]);
         let via_deref: &[u8] = &ob;
         assert_eq!(via_deref, ob.as_ref());
     }
 
     #[test]
     fn debug_shows_len() {
-        let ob = OwnedBytes::from_vec(vec![0u8; 17]);
+        let ob = Bytes::from_vec(vec![0u8; 17]);
         assert!(format!("{ob:?}").contains("17"));
     }
 
     #[test]
     fn as_mut_slice_some_for_vec() {
-        let mut ob = OwnedBytes::from_vec(vec![0u8; 4]);
+        let mut ob = Bytes::from_vec(vec![0u8; 4]);
         ob.as_mut_slice().unwrap()[0] = 99;
         assert_eq!(ob.as_ref()[0], 99);
     }
 
-    #[cfg(feature = "pool")]
+    #[cfg(any(feature = "sync", feature = "tokio", feature = "io-uring"))]
     #[test]
     fn as_mut_slice_some_for_pooled() {
-        let mut ob = Pool::new().allocate(4);
+        let mut ob = Bytes::allocate(4);
         assert!(ob.as_mut_slice().is_some());
     }
 
     #[cfg(feature = "mmap")]
     #[test]
     fn as_mut_slice_none_for_mmap() {
-        let mut ob = OwnedBytes::Mmap(make_mmap_region());
+        let mut ob = Bytes::Mmap(make_mmap_region());
         assert!(ob.as_mut_slice().is_none());
     }
 
@@ -426,29 +354,35 @@ mod tests {
     #[test]
     fn into_vec_preserves_bytes() {
         let data = vec![7u8, 8, 9];
-        assert_eq!(OwnedBytes::from_vec(data.clone()).into_vec(), data);
+        assert_eq!(Bytes::from_vec(data.clone()).into_vec(), data);
         #[cfg(feature = "mmap")]
-        assert_eq!(
-            OwnedBytes::Mmap(make_mmap_region()).into_vec(),
-            b"hello_mmap"
-        );
+        assert_eq!(Bytes::Mmap(make_mmap_region()).into_vec(), b"hello_mmap");
     }
 
     #[test]
     fn into_shared_preserves_bytes() {
         let data = vec![1u8, 2, 3];
-        let shared = OwnedBytes::from_vec(data.clone()).into_shared();
+        let shared = Bytes::from_vec(data.clone()).into_shared();
         assert_eq!(shared.as_ref(), &data[..]);
         #[cfg(feature = "mmap")]
-        let shared2 = OwnedBytes::Mmap(make_mmap_region()).into_shared();
+        let shared2 = Bytes::Mmap(make_mmap_region()).into_shared();
         #[cfg(feature = "mmap")]
         assert_eq!(shared2.as_ref(), b"hello_mmap");
     }
 
-    #[cfg(feature = "pool")]
+    #[cfg(any(feature = "sync", feature = "tokio", feature = "io-uring"))]
     #[test]
-    fn pool_allocator_returns_pooled_bytes() {
-        let ob = Pool::new().allocate(4);
-        assert!(matches!(ob, OwnedBytes::Pooled(_)));
+    fn allocate_returns_pooled_storage() {
+        let ob = Bytes::allocate(4);
+        assert!(matches!(ob, Bytes::Pooled(_)));
+        assert_eq!(ob.len(), 4);
+    }
+
+    #[cfg(any(feature = "sync", feature = "tokio", feature = "io-uring"))]
+    #[test]
+    fn zero_length_allocation_is_empty_vec() {
+        let ob = Bytes::allocate(0);
+        assert!(matches!(ob, Bytes::Vec(_)));
+        assert!(ob.is_empty());
     }
 }

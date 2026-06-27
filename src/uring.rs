@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use io_uring::{IoUring, opcode, types};
 
-use crate::{Allocator, DefaultAllocator, OwnedBytes, WriteSlice, WriteSlices};
+use crate::{Bytes, WriteSlice, WriteSlices};
 
 const DEFAULT_RING_DEPTH: u32 = 256;
 const DEFAULT_CHUNK_SIZE: usize = 4 * 1024 * 1024;
@@ -33,15 +33,14 @@ thread_local! {
 
 /// A Linux `io_uring` file handle.
 #[derive(Debug)]
-pub struct File<A = DefaultAllocator> {
+pub struct File {
     inner: std::fs::File,
     ring_depth: u32,
     chunk_size: usize,
     position: Arc<Mutex<u64>>,
-    allocator: A,
 }
 
-impl File<DefaultAllocator> {
+impl File {
     /// Opens a file in read-only mode.
     pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         OpenOptions::new().read(true).open(path)
@@ -66,9 +65,7 @@ impl File<DefaultAllocator> {
     pub fn options() -> OpenOptions {
         OpenOptions::new()
     }
-}
 
-impl<A: Allocator> File<A> {
     /// Creates a new `File` instance sharing the same underlying handle.
     pub fn try_clone(&self) -> io::Result<Self> {
         Ok(Self {
@@ -76,7 +73,6 @@ impl<A: Allocator> File<A> {
             ring_depth: self.ring_depth,
             chunk_size: self.chunk_size,
             position: Arc::clone(&self.position),
-            allocator: self.allocator.clone(),
         })
     }
 
@@ -106,13 +102,13 @@ impl<A: Allocator> File<A> {
     }
 
     /// Reads the whole file into memory from offset 0.
-    pub fn read_all(&self) -> io::Result<OwnedBytes> {
+    pub fn read_all(&self) -> io::Result<Bytes> {
         let len = usize::try_from(self.inner.metadata()?.len())
             .map_err(|_| io::Error::other("file too large"))?;
         if len == 0 {
-            return Ok(OwnedBytes::Vec(Vec::new()));
+            return Ok(Bytes::Vec(Vec::new()));
         }
-        let mut bytes = self.allocator.allocate(len);
+        let mut bytes = Bytes::allocate(len);
         let buf = bytes
             .as_mut_slice()
             .ok_or_else(|| io::Error::other("allocator returned immutable buffer"))?;
@@ -124,11 +120,11 @@ impl<A: Allocator> File<A> {
     }
 
     /// Reads `len` bytes at `offset` into a new buffer.
-    pub fn read_at(&self, offset: u64, len: usize) -> io::Result<OwnedBytes> {
+    pub fn read_at(&self, offset: u64, len: usize) -> io::Result<Bytes> {
         if len == 0 {
-            return Ok(OwnedBytes::Vec(Vec::new()));
+            return Ok(Bytes::Vec(Vec::new()));
         }
-        let mut bytes = self.allocator.allocate(len);
+        let mut bytes = Bytes::allocate(len);
         let buf = bytes
             .as_mut_slice()
             .ok_or_else(|| io::Error::other("allocator returned immutable buffer"))?;
@@ -529,7 +525,7 @@ impl<A: Allocator> File<A> {
     }
 }
 
-impl<A: Allocator> Read for File<A> {
+impl Read for File {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut position = self
             .position
@@ -543,7 +539,7 @@ impl<A: Allocator> Read for File<A> {
     }
 }
 
-impl<A: Allocator> Write for File<A> {
+impl Write for File {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut position = self
             .position
@@ -564,7 +560,7 @@ impl<A: Allocator> Write for File<A> {
     }
 }
 
-impl<A> Seek for File<A> {
+impl Seek for File {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         let mut position = self
             .position
@@ -592,7 +588,7 @@ impl<A> Seek for File<A> {
     }
 }
 
-impl<A> AsRef<std::fs::File> for File<A> {
+impl AsRef<std::fs::File> for File {
     fn as_ref(&self) -> &std::fs::File {
         &self.inner
     }
@@ -600,15 +596,14 @@ impl<A> AsRef<std::fs::File> for File<A> {
 
 /// Options and flags for opening an `io_uring` file.
 #[derive(Debug, Clone)]
-pub struct OpenOptions<A = DefaultAllocator> {
+pub struct OpenOptions {
     inner: std::fs::OpenOptions,
     ring_depth: u32,
     chunk_size: usize,
     append: bool,
-    allocator: A,
 }
 
-impl OpenOptions<DefaultAllocator> {
+impl OpenOptions {
     /// Creates a blank set of options.
     #[must_use]
     pub fn new() -> Self {
@@ -617,12 +612,9 @@ impl OpenOptions<DefaultAllocator> {
             ring_depth: DEFAULT_RING_DEPTH,
             chunk_size: DEFAULT_CHUNK_SIZE,
             append: false,
-            allocator: DefaultAllocator::default(),
         }
     }
-}
 
-impl<A: Allocator> OpenOptions<A> {
     /// Sets read access.
     pub fn read(&mut self, read: bool) -> &mut Self {
         self.inner.read(read);
@@ -672,19 +664,8 @@ impl<A: Allocator> OpenOptions<A> {
         self
     }
 
-    /// Sets the allocator used by reads on files opened with these options.
-    pub fn allocator<B: Allocator>(&self, allocator: B) -> OpenOptions<B> {
-        OpenOptions {
-            inner: self.inner.clone(),
-            ring_depth: self.ring_depth,
-            chunk_size: self.chunk_size,
-            append: self.append,
-            allocator,
-        }
-    }
-
     /// Opens a file with the configured options.
-    pub fn open<P: AsRef<Path>>(&self, path: P) -> io::Result<File<A>> {
+    pub fn open<P: AsRef<Path>>(&self, path: P) -> io::Result<File> {
         if self.ring_depth == 0 {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -708,12 +689,11 @@ impl<A: Allocator> OpenOptions<A> {
             ring_depth: self.ring_depth,
             chunk_size: self.chunk_size,
             position: Arc::new(Mutex::new(0)),
-            allocator: self.allocator.clone(),
         })
     }
 }
 
-impl Default for OpenOptions<DefaultAllocator> {
+impl Default for OpenOptions {
     fn default() -> Self {
         Self::new()
     }
@@ -722,7 +702,7 @@ impl Default for OpenOptions<DefaultAllocator> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{OwnedBytes, System, WriteSlice, WriteSlices};
+    use crate::{WriteSlice, WriteSlices};
     use tempfile::TempDir;
 
     fn allow_unavailable<T>(result: io::Result<T>) -> Option<T> {
@@ -759,25 +739,6 @@ mod tests {
         };
 
         assert_eq!(bytes.as_ref(), b"cde");
-    }
-
-    #[test]
-    fn system_allocator_returns_vec_read_buffer() {
-        let dir = TempDir::new().unwrap();
-        let path = dir.path().join("system.bin");
-        std::fs::write(&path, b"abcdef").unwrap();
-        let file = OpenOptions::new()
-            .read(true)
-            .allocator(System)
-            .open(&path)
-            .unwrap();
-
-        let Some(bytes) = allow_unavailable(file.read_at(1, 3)) else {
-            return;
-        };
-
-        assert!(matches!(&bytes, OwnedBytes::Vec(_)));
-        assert_eq!(bytes.as_ref(), b"bcd");
     }
 
     #[test]
