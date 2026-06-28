@@ -41,6 +41,20 @@ pub struct File {
 }
 
 impl File {
+    /// Returns a reference to the underlying `std::fs::File`.
+    #[inline]
+    #[must_use]
+    pub const fn get_ref(&self) -> &std::fs::File {
+        &self.inner
+    }
+
+    /// Consumes this handle, returning the underlying `std::fs::File`.
+    #[inline]
+    #[must_use]
+    pub fn into_inner(self) -> std::fs::File {
+        self.inner
+    }
+
     /// Opens a file in read-only mode.
     pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         OpenOptions::new().read(true).open(path)
@@ -77,26 +91,31 @@ impl File {
     }
 
     /// Queries metadata about the underlying file.
+    #[inline]
     pub fn metadata(&self) -> io::Result<Metadata> {
         self.inner.metadata()
     }
 
     /// Truncates or extends the underlying file.
+    #[inline]
     pub fn set_len(&self, size: u64) -> io::Result<()> {
         self.inner.set_len(size)
     }
 
     /// Attempts to sync all OS-internal file content and metadata to disk.
+    #[inline]
     pub fn sync_all(&self) -> io::Result<()> {
         self.inner.sync_all()
     }
 
     /// Attempts to sync file content to disk.
+    #[inline]
     pub fn sync_data(&self) -> io::Result<()> {
         self.inner.sync_data()
     }
 
     /// Changes permissions on the underlying file.
+    #[inline]
     pub fn set_permissions(&self, perm: Permissions) -> io::Result<()> {
         self.inner.set_permissions(perm)
     }
@@ -114,11 +133,13 @@ impl File {
     }
 
     /// Reads exactly enough bytes to fill `buf` at `offset`.
+    #[inline]
     pub fn read_exact_at(&self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
         self.submit_read_exact_at(&self.inner, offset, buf)
     }
 
     /// Writes all bytes from `buf` at `offset`.
+    #[inline]
     pub fn write_all_at(&self, offset: u64, buf: &[u8]) -> io::Result<()> {
         self.submit_write_exact_at(&self.inner, offset, buf)
     }
@@ -504,6 +525,7 @@ impl File {
 }
 
 impl Read for File {
+    #[inline]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut position = self
             .position
@@ -518,6 +540,7 @@ impl Read for File {
 }
 
 impl Write for File {
+    #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut position = self
             .position
@@ -533,12 +556,14 @@ impl Write for File {
         Ok(n)
     }
 
+    #[inline]
     fn flush(&mut self) -> io::Result<()> {
         self.inner.flush()
     }
 }
 
 impl Seek for File {
+    #[inline]
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         let mut position = self
             .position
@@ -567,6 +592,7 @@ impl Seek for File {
 }
 
 impl AsRef<std::fs::File> for File {
+    #[inline]
     fn as_ref(&self) -> &std::fs::File {
         &self.inner
     }

@@ -86,7 +86,22 @@ impl File {
         OpenOptions::new()
     }
 
+    /// Returns a reference to the underlying `std::fs::File`.
+    #[inline]
+    #[must_use]
+    pub const fn get_ref(&self) -> &StdFile {
+        &self.inner
+    }
+
+    /// Consumes this handle, returning the underlying `std::fs::File`.
+    #[inline]
+    #[must_use]
+    pub fn into_inner(self) -> StdFile {
+        self.inner
+    }
+
     /// Creates a new `File` instance sharing the same underlying handle.
+    #[inline]
     pub fn try_clone(&self) -> IoResult<Self> {
         Ok(Self {
             inner: self.inner.try_clone()?,
@@ -94,6 +109,7 @@ impl File {
     }
 
     /// Queries metadata about the underlying file.
+    #[inline]
     pub fn metadata(&self) -> IoResult<Metadata> {
         self.inner.metadata()
     }
@@ -165,6 +181,7 @@ impl File {
 }
 
 impl AsRef<StdFile> for File {
+    #[inline]
     fn as_ref(&self) -> &StdFile {
         &self.inner
     }
@@ -179,7 +196,7 @@ pub struct OpenOptions {
 impl OpenOptions {
     /// Creates a blank set of options.
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { _private: () }
     }
 

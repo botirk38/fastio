@@ -1,8 +1,8 @@
 # tokio Backend
 
-The `tokio` module provides a `tokio::fs`-like `File` and `OpenOptions` with positioned I/O methods.
+The `tokio` module provides async `File` and `OpenOptions` with positioned I/O methods.
 
-Regular filesystem operations use `tokio::fs` directly. Positioned reads and writes move owned buffers into blocking tasks because Tokio does not expose positioned file I/O; batch writes use bounded worker waves inside one blocking task.
+Regular filesystem operations such as open, clone, metadata, set length, sync, and permissions delegate to `tokio::fs`. Positioned reads and writes move a `try_clone`d `std::fs::File` into `tokio::task::spawn_blocking` so they do not block runtime worker threads. On Unix, positioned reads and writes use `pread`/`pwrite` which are cursor-independent; on Windows, platform helpers save/restore the file position. Batch writes use bounded worker waves inside one blocking task.
 
 Default reads allocate from the internal buffer pool.
 

@@ -12,76 +12,15 @@
 //! Zero-length reads return an empty `Bytes::Vec` without touching the pool.
 
 use std::fmt;
+
+#[cfg(feature = "mmap")]
 use std::sync::Arc;
 
 #[cfg(any(feature = "sync", feature = "tokio", feature = "io-uring"))]
 use zeropool::ZeroPool;
 
-// ============================================================================
-// MmapRegion — Arc-backed memory-mapped file region
-// ============================================================================
-
-/// A memory-mapped file region backed by an `Arc<memmap2::Mmap>`.
-///
-/// Cheaply cloneable; `as_slice()` returns exactly `len` bytes starting at
-/// `start` within the underlying mapping.
 #[cfg(feature = "mmap")]
-#[derive(Debug, Clone)]
-pub struct MmapRegion {
-    inner: Arc<memmap2::Mmap>,
-    start: usize,
-    len: usize,
-}
-
-#[cfg(feature = "mmap")]
-impl MmapRegion {
-    pub(crate) fn new(inner: Arc<memmap2::Mmap>, start: usize, len: usize) -> Self {
-        debug_assert!(start.checked_add(len).is_some_and(|end| end <= inner.len()));
-        Self { inner, start, len }
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn subregion(&self, offset: usize, len: usize) -> Option<Self> {
-        let relative_end = offset.checked_add(len)?;
-        if relative_end > self.len {
-            return None;
-        }
-        let start = self.start.checked_add(offset)?;
-        Some(Self::new(Arc::clone(&self.inner), start, len))
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn as_slice(&self) -> &[u8] {
-        &self.inner[self.start..self.start + self.len]
-    }
-    #[inline]
-    #[must_use]
-    pub const fn len(&self) -> usize {
-        self.len
-    }
-    #[inline]
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-}
-
-#[cfg(feature = "mmap")]
-impl AsRef<[u8]> for MmapRegion {
-    fn as_ref(&self) -> &[u8] {
-        self.as_slice()
-    }
-}
-
-#[cfg(feature = "mmap")]
-impl std::ops::Deref for MmapRegion {
-    type Target = [u8];
-    fn deref(&self) -> &[u8] {
-        self.as_slice()
-    }
-}
+use crate::mmap::MmapRegion;
 
 // ============================================================================
 // Bytes
@@ -118,9 +57,7 @@ impl Bytes {
         init: impl FnOnce(&mut [u8]) -> crate::IoResult<()>,
     ) -> crate::IoResult<Self> {
         if len == 0 {
-            return Ok(Self {
-                inner: Storage::Vec(Vec::new()),
-            });
+            return Ok(Self { inner: Storage::Vec(Vec::new()) });
         }
         let mut uninit = global_pool().alloc_uninit(len);
         let uninit_slice = uninit.as_uninit_mut();
@@ -132,18 +69,14 @@ impl Bytes {
         init(init_slice)?;
         // SAFETY: the closure has promised to initialize all bytes in `init_slice`.
         let buf = unsafe { uninit.assume_init() };
-        Ok(Self {
-            inner: Storage::Pooled(buf),
-        })
+        Ok(Self { inner: Storage::Pooled(buf) })
     }
 
     /// Wrap a plain `Vec<u8>`.
     #[inline]
     #[must_use]
     pub fn from_vec(v: Vec<u8>) -> Self {
-        Self {
-            inner: Storage::Vec(v),
-        }
+        Self { inner: Storage::Vec(v) }
     }
 
     /// Wrap a memory-mapped region.
@@ -151,9 +84,7 @@ impl Bytes {
     #[inline]
     #[must_use]
     pub fn from_mmap(region: MmapRegion) -> Self {
-        Self {
-            inner: Storage::Mmap(region),
-        }
+        Self { inner: Storage::Mmap(region) }
     }
 
     /// Number of bytes.
@@ -209,12 +140,12 @@ impl Bytes {
     ///
     /// Copies when backed by `Mmap` storage.
     #[must_use]
-    pub fn into_shared(self) -> Arc<[u8]> {
+    pub fn into_shared(self) -> std::sync::Arc<[u8]> {
         match self.inner {
             #[cfg(any(feature = "sync", feature = "tokio", feature = "io-uring"))]
             Storage::Pooled(b) => b.into_inner().into(),
             #[cfg(feature = "mmap")]
-            Storage::Mmap(b) => Arc::from(b.as_slice()),
+            Storage::Mmap(b) => std::sync::Arc::from(b.as_slice()),
             Storage::Vec(b) => b.into(),
         }
     }
@@ -244,9 +175,7 @@ impl std::ops::Deref for Bytes {
 
 impl fmt::Debug for Bytes {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Bytes")
-            .field("len", &self.len())
-            .finish_non_exhaustive()
+        f.debug_struct("Bytes").field("len", &self.len()).finish_non_exhaustive()
     }
 }
 
@@ -409,10 +338,7 @@ mod tests {
         let data = vec![7u8, 8, 9];
         assert_eq!(Bytes::from_vec(data.clone()).into_vec(), data);
         #[cfg(feature = "mmap")]
-        assert_eq!(
-            Bytes::from_mmap(make_mmap_region()).into_vec(),
-            b"hello_mmap"
-        );
+        assert_eq!(Bytes::from_mmap(make_mmap_region()).into_vec(), b"hello_mmap");
     }
 
     #[test]
