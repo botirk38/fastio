@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest a new feature or improvement for fastio
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature. Please describe the use case and the proposed API.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What problem are you trying to solve? What is the current limitation?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the API or behavior you would like to see. If possible, include a code sketch.
+      render: rust
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What alternatives have you considered?
+  - type: input
+    id: backend
+    attributes:
+      label: Affected backend(s)
+      placeholder: e.g., sync, tokio, mmap, uring, all
